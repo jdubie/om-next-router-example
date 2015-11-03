@@ -1,0 +1,6 @@
+*.log
+target/
+.lein-repl-history
+.DS_Store
+.nrepl-port
+resources/public/js/
