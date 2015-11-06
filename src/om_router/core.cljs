@@ -32,13 +32,19 @@
 
 (defmulti read om/dispatch)
 
+(defn- get-route
+  [state]
+  (or (:route @state) (get-current-route)))
+
 (defmethod read :route
   [{:keys [state]} _ _]
-  {:value (or (:route @state) (get-current-route))})
+  {:value (get-route state)})
 
 (defmethod read :page
-  [{:keys [selector parser] :as env} _ _]
-  {:value (parser env selector)})
+  ; NOTE: selector is a union query over all routes. We filter out just the
+  ; current route.
+  [{:keys [selector parser state] :as env} _ _]
+  {:value (parser env (selector (get-route state)))})
 
 (defmethod read :page/home
   [_ _ _]
@@ -70,8 +76,6 @@
   (render [this]
     (dom/div nil (:page/home (om/props this)))))
 
-(def home-page (om/factory HomePage))
-
 (defui Contact
   static om/IQuery
   (query [this]
@@ -79,8 +83,6 @@
   Object
   (render [this]
     (dom/div nil (:page/contact (om/props this)))))
-
-(def contact (om/factory Contact))
 
 (defui About
   static om/IQuery
@@ -90,8 +92,6 @@
   (render [this]
     (dom/div nil (:page/about (om/props this)))))
 
-(def about (om/factory About))
-
 (defui Faq
   static om/IQuery
   (query [this]
@@ -99,8 +99,6 @@
   Object
   (render [this]
     (dom/div nil (:page/faq (om/props this)))))
-
-(def faq (om/factory Faq))
 
 (defn menu-entry [{:keys [route selected?] :as props}]
   (let [{:keys [did-select]} (om/get-computed props)]
@@ -110,10 +108,26 @@
                                      (if selected? {:color :blue}))})
              (name route)))))
 
+;;; Mapping from route to components, queries, and factories
+
+(def route->component
+  {:index HomePage
+   :faq Faq
+   :contact Contact
+   :about About})
+
+(def route->factory
+  (zipmap (keys route->component)
+          (map om/factory (vals route->component))))
+
+(def route->query
+  (zipmap (keys route->component)
+          (map om/get-query (vals route->component))))
+
 (defui Root
   static om/IQueryParams
   (params [this]
-    {:page (om/subquery this :page HomePage)})
+    {:page route->query})
   static om/IQuery
   (query [this]
     '[:route {:page ?page}])
@@ -133,12 +147,8 @@
                                                 `[(route/update {:new-route ~cur-route})
                                                   :route]))})))
                       entries)))
-        ((case route
-           :index home-page
-           :faq faq
-           :contact contact
-           :about about)
-         (merge page {:ref :page}))))))
+        ;; render the current page here
+        ((route->factory route) page)))))
 
 (def parser (om/parser {:read read :mutate mutate}))
 
