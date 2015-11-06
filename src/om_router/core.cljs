@@ -68,7 +68,6 @@
     [:page/home])
   Object
   (render [this]
-          (println "home" (om/props this))
     (dom/div nil (:page/home (om/props this)))))
 
 (def home-page (om/factory HomePage))
