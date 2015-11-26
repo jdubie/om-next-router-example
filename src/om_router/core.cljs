@@ -1,8 +1,11 @@
 (ns om-router.core
   (:require [goog.dom :as gdom]
             [om.next :as om :refer-macros [defui]]
-            [bidi.bidi :refer [match-route]]
-            [om.dom :as dom]))
+            [bidi.bidi :as bidi :refer [match-route]]
+            [om.dom :as dom]
+            [pushy.core :as pushy])
+  (:require-macros
+            [cljs-log.core :as l :refer [debug info warn severe]]))
 
 (enable-console-print!)
 
@@ -13,9 +16,13 @@
                   "contact" :contact
                   "about" :about}])
 
-(defn url->route
-  [url]
+(def route->url (partial bidi/path-for routes))
+
+(defn url->route [url]
   (:handler (match-route routes url)))
+
+(defn parse-url [url]
+  (match-route routes url))
 
 (defn get-current-route
   []
@@ -27,7 +34,7 @@
 
 (defmethod mutate 'route/update
   [{:keys [state]} _ {:keys [new-route]}]
-  {:value [:route]
+  {:value {:keys [:route]}
    :action (fn [] (swap! state assoc :route new-route))})
 
 (defmulti read om/dispatch)
@@ -43,8 +50,8 @@
 (defmethod read :page
   ; NOTE: selector is a union query over all routes. We filter out just the
   ; current route.
-  [{:keys [selector parser state] :as env} _ _]
-  {:value (parser env (selector (get-route state)))})
+  [{:keys [query parser state] :as env} _ _]
+  {:value (parser env (query (get-route state)))})
 
 (defmethod read :page/home
   [_ _ _]
@@ -103,10 +110,11 @@
 (defn menu-entry [{:keys [route selected?] :as props}]
   (let [{:keys [did-select]} (om/get-computed props)]
     (dom/li nil
-      (dom/a (clj->js {:onClick did-select
-                       :style (merge {:cursor true}
-                                     (if selected? {:color :blue}))})
-             (name route)))))
+      (dom/a (clj->js { ;:onClick did-select
+                        :href (route->url route)
+                        :style (merge {:cursor true}
+                                  (if selected? {:color :blue}))})
+        (name route)))))
 
 ;;; Mapping from route to components, queries, and factories
 
@@ -124,6 +132,8 @@
   (zipmap (keys route->component)
           (map om/get-query (vals route->component))))
 
+(declare history)
+
 (defui Root
   static om/IQueryParams
   (params [this]
@@ -132,6 +142,33 @@
   (query [this]
     '[:route {:page ?page}])
   Object
+  (nav-handler [this match]
+    (debug "Pushy caught a nav change" match)
+
+    (debug "Set-Params!")
+    (let [params {:page route->query}]
+      (om/set-query! this {:params params}))
+
+    (debug "om/transact! (route/update)")
+    (om/transact! this `[(route/update ~match) :route]))
+  (change-route [this handler args]
+    (debug "CHANGE URL: " handler args)
+    (let [path (:path args)]
+      (debug "Pushy/Set-Token!" path)
+      (pushy/set-token! history (or path "/unknown-route"))))
+
+  (componentDidMount [this]
+    (debug "App mounted")
+    (let [nav-fn #(.nav-handler this % nil)
+          pushy (pushy/pushy nav-fn parse-url)]
+      (debug "HISTORY/get-token" (pushy/get-token pushy))
+      (pushy/start! pushy)
+      (set! history pushy)))
+
+  (componentWillUnmount [this]
+    (debug "App unmounting")
+    (pushy/stop! history))
+
   (render [this]
     (let [{:keys [route page]} (om/props this)
           entries (vals (second routes))]
@@ -142,10 +179,16 @@
                         (menu-entry
                          (om/computed {:route cur-route :selected? (= cur-route route)}
                                       {:did-select
-                                       (fn [] (om/transact!
-                                                this
-                                                `[(route/update {:new-route ~cur-route})
-                                                  :route]))})))
+                                        (fn [handler args]
+                                          (debug "DISPATCH CALLBACK: " handler args)
+                                          (.change-route this handler args))})))
+
+
+                                        ; (fn [] (om/transact!
+                                        ;         this
+                                        ;         `[(route/update {:new-route ~cur-route})
+                                        ;           :route]))})))
+
                       entries)))
         ;; render the current page here
         ((route->factory route) page)))))
@@ -154,7 +197,7 @@
 
 (def reconciler
   (om/reconciler
-    {:state (atom {})
+    {:state (atom {:route :index})
      :parser parser}))
 
 (om/add-root! reconciler Root (gdom/getElement "app"))
