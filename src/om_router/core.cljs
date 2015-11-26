@@ -51,7 +51,9 @@
   ; NOTE: selector is a union query over all routes. We filter out just the
   ; current route.
   [{:keys [query parser state] :as env} _ _]
-  {:value (parser env (query (get-route state)))})
+  (let [_ (debug ":page query" query)]
+    ;{:value (parser env (query (get-route state)))}))
+    {:value (parser env query)}))
 
 (defmethod read :page/home
   [_ _ _]
@@ -137,7 +139,7 @@
 (defui Root
   static om/IQueryParams
   (params [this]
-    {:page route->query})
+    {:page (:index route->query)})
   static om/IQuery
   (query [this]
     '[:route {:page ?page}])
@@ -146,7 +148,7 @@
     (debug "Pushy caught a nav change" match)
 
     (debug "Set-Params!")
-    (let [params {:page route->query}]
+    (let [params {:page ((:handler match) route->query)}]
       (om/set-query! this {:params params}))
 
     (debug "om/transact! (route/update)")
@@ -159,7 +161,7 @@
 
   (componentDidMount [this]
     (debug "App mounted")
-    (let [nav-fn #(.nav-handler this % nil)
+    (let [nav-fn #(.nav-handler this %)
           pushy (pushy/pushy nav-fn parse-url)]
       (debug "HISTORY/get-token" (pushy/get-token pushy))
       (pushy/start! pushy)
