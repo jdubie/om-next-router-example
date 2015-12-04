@@ -18,15 +18,8 @@
 
 (def route->url (partial bidi/path-for routes))
 
-(defn url->route [url]
-  (:handler (match-route routes url)))
-
 (defn parse-url [url]
   (match-route routes url))
-
-(defn get-current-route
-  []
-  (url->route (.-pathname js/location)))
 
 ;;; parsing
 
@@ -39,21 +32,14 @@
 
 (defmulti read om/dispatch)
 
-(defn- get-route
-  [state]
-  (or (:route @state) (get-current-route)))
-
 (defmethod read :route
   [{:keys [state]} _ _]
-  {:value (get-route state)})
+  {:value (get @state :route)})
 
 (defmethod read :page
-  ; NOTE: selector is a union query over all routes. We filter out just the
-  ; current route.
   [{:keys [query parser state] :as env} _ _]
-  (let [_ (debug ":page query" query)]
-    ;{:value (parser env (query (get-route state)))}))
-    {:value (parser env query)}))
+  (debug ":page query" query)
+  {:value (parser env query)})
 
 (defmethod read :page/home
   [_ _ _]
@@ -109,14 +95,11 @@
   (render [this]
     (dom/div nil (:page/faq (om/props this)))))
 
-(defn menu-entry [{:keys [route selected?] :as props}]
-  (let [{:keys [did-select]} (om/get-computed props)]
-    (dom/li nil
-      (dom/a (clj->js { ;:onClick did-select
-                        :href (route->url route)
-                        :style (merge {:cursor true}
-                                  (if selected? {:color :blue}))})
-        (name route)))))
+(defn menu-entry
+  [{:keys [route selected?] :as props}]
+  (dom/li nil
+    (dom/a (clj->js {:href (route->url route)})
+      (if selected? (str (name route) " (selected)") (name route)))))
 
 ;;; Mapping from route to components, queries, and factories
 
@@ -136,6 +119,11 @@
 
 (declare history)
 
+(defn update-query-from-route!
+  [this route]
+  (debug "Set-Params!")
+  (om/set-query! this {:params {:page (get route->query route)}}))
+
 (defui Root
   static om/IQueryParams
   (params [this]
@@ -143,21 +131,25 @@
   static om/IQuery
   (query [this]
     '[:route {:page ?page}])
+
   Object
-  (nav-handler [this match]
+  (nav-handler
+    [this match]
+    "Sync: Browser -> OM"
     (debug "Pushy caught a nav change" match)
+    (let [{route :handler} match]
+      (update-query-from-route! this route)
+      (om/transact! this `[(route/update {:new-route ~route})
+                           :route])))
 
-    (debug "Set-Params!")
-    (let [params {:page ((:handler match) route->query)}]
-      (om/set-query! this {:params params}))
-
-    (debug "om/transact! (route/update)")
-    (om/transact! this `[(route/update ~match) :route]))
-  (change-route [this handler args]
-    (debug "CHANGE URL: " handler args)
-    (let [path (:path args)]
-      (debug "Pushy/Set-Token!" path)
-      (pushy/set-token! history (or path "/unknown-route"))))
+  (componentWillReceiveProps
+    [this props]
+    "Sync: OM -> Browser"
+    (let [[old-route new-route] [(:route (om/props this)) (:route props)]]
+      (debug "componentWillReceiveProps" old-route new-route)
+      (when (not= new-route old-route)
+        (update-query-from-route! this new-route)
+        (pushy/set-token! history (or (route->url new-route) "/unknown-route")))))
 
   (componentDidMount [this]
     (debug "App mounted")
@@ -174,26 +166,27 @@
   (render [this]
     (let [{:keys [route page]} (om/props this)
           entries (vals (second routes))]
+
       (dom/div nil
-        (dom/ul nil
+        ;; routing via pushy
+        (dom/div nil
+          (dom/p nil "change route via pushy and anchor tags")
           (apply dom/ul nil
                  (map (fn [cur-route]
-                        (menu-entry
-                         (om/computed {:route cur-route :selected? (= cur-route route)}
-                                      {:did-select
-                                        (fn [handler args]
-                                          (debug "DISPATCH CALLBACK: " handler args)
-                                          (.change-route this handler args))})))
-
-
-                                        ; (fn [] (om/transact!
-                                        ;         this
-                                        ;         `[(route/update {:new-route ~cur-route})
-                                        ;           :route]))})))
-
+                        (menu-entry {:route cur-route :selected? (= cur-route route)}))
                       entries)))
+
+        ;; routing in a transaction
+        (dom/div nil
+          (dom/p nil "change route via a transaction")
+          (dom/button #js {:onClick #(om/transact! this '[(route/update {:new-route :about})
+                                                         :route])}
+                      "goto about"))
+
         ;; render the current page here
-        ((route->factory route) page)))))
+        (dom/div nil
+          (dom/p nil "current page:")
+          ((route->factory route) page))))))
 
 (def parser (om/parser {:read read :mutate mutate}))
 
