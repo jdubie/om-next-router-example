@@ -41,6 +41,7 @@
 (defmethod read :route
   [{:keys [state query parser] :as env} _ _]
   (let [{:keys [current-route]} @state]
+    "Here `query` is a map from route -> query. So we only use the query for the current route"
     {:value (parser (dissoc env :query)
                     (get query current-route))}))
 
