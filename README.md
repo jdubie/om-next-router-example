@@ -4,7 +4,7 @@ A simple om next router that demonstrates client-side url-based routing, browser
 
 
 ## Getting started
-```
+```sh
 git clone https://github.com/jdubie/om-next-router
 make
 # rlwrap lein run -m clojure.main script/figwheel.clj
@@ -29,7 +29,7 @@ against our "nice properties of om".
 Let's say you have a button when a user clicks it you update the route based on some logic. 
 
 ### total routing
-```
+```clj
 ;; ui
 (defui Component
   static om/IQuery
@@ -50,7 +50,7 @@ Let's say you have a button when a user clicks it you update the route based on 
 This is pretty clean. Not lets try using `om/set-query!`
 
 ## via `om/set-query!`
-```
+```clj
 ;; ui
 (defui Component
   static om/IQuery
